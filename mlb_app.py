@@ -58,6 +58,17 @@ def extract_market_odds(api_data):
     return odds_dict
 
 def send_email_alert(matchup, edge, fair_odds, book_odds):
+    msg = MIMEText(f"""Value alert for {matchup}!
+Fair: {fair_odds}, Market: {book_odds}, Edge: {edge*100:.1f}%""")
+    msg["Subject"] = f"VALUE ALERT: {matchup}"
+    msg["From"] = SMTP_EMAIL
+    msg["To"] = RECEIVER_EMAIL
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(SMTP_EMAIL, SMTP_PASSWORD)
+            server.send_message(msg)
+    except Exception as e:
+        st.error(f"Email failed: {e}")
 msg = MIMEText(f"""Value alert for {matchup}!
 Fair: {fair_odds}, Market: {book_odds}, Edge: {edge*100:.1f}%""")
     msg["Subject"] = f"VALUE ALERT: {matchup}"
