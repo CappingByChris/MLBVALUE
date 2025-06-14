@@ -58,8 +58,9 @@ def extract_market_odds(api_data):
     return odds_dict
 
 def send_email_alert(matchup, edge, fair_odds, book_odds):
-    msg = MIMEText(f"Value alert for {matchup}!
-Fair: {fair_odds}, Market: {book_odds}, Edge: {edge*100:.1f}%")
+ msg = MIMEText(
+    f"""Value alert for {matchup}!
+Fair: {fair_odds}, Market: {book_odds}, Edge: {edge*100:.1f}%"""
     msg["Subject"] = f"VALUE ALERT: {matchup}"
     msg["From"] = SMTP_EMAIL
     msg["To"] = RECEIVER_EMAIL
