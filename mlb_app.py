@@ -58,19 +58,10 @@ def extract_market_odds(api_data):
     return odds_dict
 
 def send_email_alert(matchup, edge, fair_odds, book_odds):
-    msg = MIMEText(f"""Value alert for {matchup}!
-Fair: {fair_odds}, Market: {book_odds}, Edge: {edge*100:.1f}%""")
-    msg["Subject"] = f"VALUE ALERT: {matchup}"
-    msg["From"] = SMTP_EMAIL
-    msg["To"] = RECEIVER_EMAIL
-    try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(SMTP_EMAIL, SMTP_PASSWORD)
-            server.send_message(msg)
-    except Exception as e:
-        st.error(f"Email failed: {e}")
-msg = MIMEText(f"""Value alert for {matchup}!
-Fair: {fair_odds}, Market: {book_odds}, Edge: {edge*100:.1f}%""")
+    msg = MIMEText(
+        f"""Value alert for {matchup}!
+Fair: {fair_odds}, Market: {book_odds}, Edge: {edge*100:.1f}%"""
+    )
     msg["Subject"] = f"VALUE ALERT: {matchup}"
     msg["From"] = SMTP_EMAIL
     msg["To"] = RECEIVER_EMAIL
@@ -85,6 +76,7 @@ Fair: {fair_odds}, Market: {book_odds}, Edge: {edge*100:.1f}%""")
 st.title("⚾ MLB Betting Dashboard")
 odds_data = extract_market_odds(get_odds())
 rows = []
+
 for g in games:
     ph, pa, mlh, mla = simulate_game(g["home_exp"], g["away_exp"])
     matchup = f"{g['away']} @ {g['home']}"
@@ -111,4 +103,3 @@ st.dataframe(df)
 
 # Export
 st.download_button("📁 Export CSV", df.to_csv(index=False), file_name="mlb_odds.csv")
-
