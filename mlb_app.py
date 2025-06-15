@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import datetime
 import requests
 from config import ODDS_API_KEY, SMTP_EMAIL, SMTP_PASSWORD, RECEIVER_EMAIL, EDGE_THRESHOLD
 import smtplib
@@ -51,22 +50,25 @@ def extract_market_odds(api_data):
                 for market in bookmaker['markets']:
                     if market['key'] == 'h2h':
                         outcomes = {o['name']: o['price'] for o in market['outcomes']}
-                        away = [team for team in outcomes if team != home][0]
-                        odds_dict[f"{away} @ {home}"] = {
-                            "home_odds": outcomes.get(home),
-                            "away_odds": outcomes.get(away)
-                        }
+                        teams = list(outcomes.keys())
+                        if home in teams:
+                            away = teams[0] if teams[1] == home else teams[1]
+                            matchup = f"{away} @ {home}"
+                            odds_dict[matchup] = {
+                                "home_odds": outcomes.get(home),
+                                "away_odds": outcomes.get(away)
+                            }
                         break
                 break
         except Exception as e:
             st.warning(f"Failed to parse odds for a game: {e}")
     return odds_dict
 
-def send_email_alert(matchup, edge, fair_odds, book_odds):
+def send_email_alert(matchup, team, edge, fair_odds, book_odds):
     msg = MIMEText(
-        f"Value alert for {matchup}!\nFair: {fair_odds}, Market: {book_odds}, Edge: {edge*100:.1f}%"
+        f"Value alert for {team} in {matchup}!\nFair: {fair_odds}, Market: {book_odds}, Edge: {edge*100:.1f}%"
     )
-    msg["Subject"] = f"VALUE ALERT: {matchup}"
+    msg["Subject"] = f"VALUE ALERT: {team} in {matchup}"
     msg["From"] = SMTP_EMAIL
     msg["To"] = RECEIVER_EMAIL
     try:
@@ -85,23 +87,42 @@ for g in games:
     matchup = f"{g['away']} @ {g['home']}"
     market = odds_data.get(matchup, {})
     mh, ma = market.get("home_odds"), market.get("away_odds")
-    edge = None
-    bet = ""
-    if mh and mlh:
+    
+    edge_home = edge_away = None
+    alert_home = alert_away = ""
+
+    # Edge for home
+    if mh is not None and mlh is not None:
         try:
-            edge = (int(mh) - mlh) / abs(mlh)
-            if edge >= EDGE_THRESHOLD:
-                bet = "✅"
-                send_email_alert(matchup, edge, mlh, mh)
+            edge_home = (int(mh) - mlh) / abs(mlh)
+            if edge_home >= EDGE_THRESHOLD:
+                alert_home = "✅"
+                send_email_alert(matchup, g["home"], edge_home, mlh, mh)
         except:
-            edge = None
+            edge_home = None
+
+    # Edge for away
+    if ma is not None and mla is not None:
+        try:
+            edge_away = (int(ma) - mla) / abs(mla)
+            if edge_away >= EDGE_THRESHOLD:
+                alert_away = "✅"
+                send_email_alert(matchup, g["away"], edge_away, mla, ma)
+        except:
+            edge_away = None
+
     rows.append({
         "Matchup": matchup,
         "P(Home Win)": round(ph, 3),
+        "P(Away Win)": round(pa, 3),
         "Fair ML (Home)": mlh,
+        "Fair ML (Away)": mla,
         "Book ML (Home)": mh,
-        "Edge": f"{edge*100:.1f}%" if edge is not None else "",
-        "Alert": bet
+        "Book ML (Away)": ma,
+        "Edge (Home)": f"{edge_home*100:.1f}%" if edge_home is not None else "",
+        "Edge (Away)": f"{edge_away*100:.1f}%" if edge_away is not None else "",
+        "Alert (Home)": alert_home,
+        "Alert (Away)": alert_away
     })
 
 df = pd.DataFrame(rows)
