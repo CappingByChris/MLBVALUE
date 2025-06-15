@@ -136,3 +136,10 @@ for g in games:
 df = pd.DataFrame(rows)
 st.dataframe(df)
 st.download_button("📁 Export CSV", df.to_csv(index=False), file_name="mlb_odds.csv")
+# config.py
+
+ODDS_API_KEY = "0a9a20c6b8b08c7cec9ed49704a8ffab"
+SMTP_EMAIL = "thevaluefinder@gmail.com"
+SMTP_PASSWORD = "found value"
+RECEIVER_EMAIL = "cappingbychris@gmail.com"
+EDGE_THRESHOLD = 0.03  # 3% edge threshold
