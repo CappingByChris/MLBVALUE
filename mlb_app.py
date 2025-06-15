@@ -6,8 +6,14 @@ import smtplib
 from datetime import datetime
 from email.mime.text import MIMEText
 from difflib import get_close_matches
+import os
 
-from config import ODDS_API_KEY, SMTP_EMAIL, SMTP_PASSWORD, RECEIVER_EMAIL, EDGE_THRESHOLD
+# Load environment variables (for Streamlit Cloud or local with .env)
+ODDS_API_KEY = os.environ.get("ODDS_API_KEY")
+SMTP_EMAIL = os.environ.get("SMTP_EMAIL")
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD")
+RECEIVER_EMAIL = os.environ.get("RECEIVER_EMAIL")
+EDGE_THRESHOLD = float(os.environ.get("EDGE_THRESHOLD", 0.05))
 
 st.set_page_config(page_title="MLB Betting Dashboard", layout="wide")
 
@@ -53,24 +59,26 @@ def get_odds():
     url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={ODDS_API_KEY}&regions=us&markets=h2h&oddsFormat=american"
     try:
         res = requests.get(url)
+        res.raise_for_status()
         return res.json()
-    except:
+    except requests.RequestException as e:
+        st.error(f"Failed to fetch odds from API: {e}")
         return []
 
 def match_team(name, all_names):
     match = get_close_matches(name, all_names, n=1, cutoff=0.6)
-    return match[0] if match else None
+    if not match:
+        st.warning(f"No match found for team: {name}")
+        return None
+    return match[0]
 
 def extract_market_odds(api_data):
     odds_dict = {}
-    all_teams = set()
-    for g in api_data:
-        all_teams.update(g.get("teams", []))
-
     for game in api_data:
         teams = game.get("teams", [])
         home = game.get("home_team")
-        if not teams or not home: continue
+        if not teams or not home:
+            continue
         away = [t for t in teams if t != home][0]
         for book in game.get("bookmakers", []):
             for market in book.get("markets", []):
@@ -93,8 +101,9 @@ Fair: {fair_odds}, Market: {book_odds}, Edge: {edge*100:.1f}%""")
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(SMTP_EMAIL, SMTP_PASSWORD)
             server.send_message(msg)
+            st.success(f"Email sent for {matchup}")
     except Exception as e:
-        st.error(f"Email failed: {e}")
+        st.error(f"Email failed for {matchup}: {e}")
 
 # === Run App ===
 st.title("⚾ MLB Betting Dashboard")
@@ -109,15 +118,18 @@ for g in games:
 
     ph, pa, mlh, mla = simulate_game(g["home_exp"], g["away_exp"])
 
-    # Fuzzy match odds using difflib
-    matchup_key = match_team(home_full, [k[0] for k in odds_data.keys()]), match_team(away_full, [k[1] for k in odds_data.keys()])
-    market = odds_data.get(matchup_key, {})
-    mh, ma = market.get("home_odds"), market.get("away_odds")
+    matchup_key = (match_team(home_full, [k[0] for k in odds_data.keys()]), 
+                   match_team(away_full, [k[1] for k in odds_data.keys()]))
+    if None in matchup_key:
+        mh, ma = None, None
+    else:
+        market = odds_data.get(matchup_key, {})
+        mh, ma = market.get("home_odds"), market.get("away_odds")
 
     edge = None
     bet = ""
-    if mh and mlh:
-        edge = (int(mh) - mlh) / abs(mlh)
+    if mh and mlh and isinstance(mh, (int, float)) and mlh != 0:
+        edge = (mh - mlh) / abs(mlh)
         if edge >= EDGE_THRESHOLD:
             bet = "✅"
             send_email_alert(f"{away_abbr} @ {home_abbr}", edge, mlh, mh)
@@ -127,19 +139,13 @@ for g in games:
         "P(Home Win)": round(ph, 3),
         "Fair ML (Home)": mlh,
         "Fair ML (Away)": mla,
-        "Book ML (Home)": mh if mh else "❌",
-        "Book ML (Away)": ma if ma else "❌",
-        "Edge": f"{edge*100:.1f}%" if edge else "",
+        "Book ML (Home)": mh if mh is not None else "❌",
+        "Book ML (Away)": ma if ma is not None else "❌",
+        "Edge": f"{edge*100:.1f}%" if edge is not None else "",
         "Alert": bet
     })
 
 df = pd.DataFrame(rows)
-st.dataframe(df)
+df.fillna("", inplace=True)
+st.dataframe(df, use_container_width=True)
 st.download_button("📁 Export CSV", df.to_csv(index=False), file_name="mlb_odds.csv")
-# config.py
-
-ODDS_API_KEY = "0a9a20c6b8b08c7cec9ed49704a8ffab"
-SMTP_EMAIL = "thevaluefinder@gmail.com"
-SMTP_PASSWORD = "found value"
-RECEIVER_EMAIL = "cappingbychris@gmail.com"
-EDGE_THRESHOLD = 0.03  # 3% edge threshold
