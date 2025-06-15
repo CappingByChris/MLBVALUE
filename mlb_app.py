@@ -190,4 +190,3 @@ st.download_button(
     df.to_csv(index=False),
     file_name=f"mlb_odds_{timestamp}.csv"
 )
-curl "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey=0a9a20c6b8b08c7cec9ed49704a8ffab®ions=us&markets=h2h&oddsFormat=american"
