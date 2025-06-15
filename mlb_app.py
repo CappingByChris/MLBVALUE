@@ -7,17 +7,28 @@ from datetime import datetime
 from email.mime.text import MIMEText
 from difflib import get_close_matches
 import os
+from dotenv import load_dotenv
 
-# Load environment variables (for Streamlit Cloud or local with .env)
-ODDS_API_KEY = os.environ.get("ODDS_API_KEY")
-SMTP_EMAIL = os.environ.get("SMTP_EMAIL")
-SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD")
-RECEIVER_EMAIL = os.environ.get("RECEIVER_EMAIL")
-EDGE_THRESHOLD = float(os.environ.get("EDGE_THRESHOLD", 0.05))
+# Load environment variables from .env file for local development
+load_dotenv()
+
+# Load environment variables (prefer st.secrets for Streamlit Cloud, fallback to os.environ)
+ODDS_API_KEY = st.secrets.get("ODDS_API_KEY", os.environ.get("ODDS_API_KEY"))
+SMTP_EMAIL = st.secrets.get("SMTP_EMAIL", os.environ.get("SMTP_EMAIL"))
+SMTP_PASSWORD = st.secrets.get("SMTP_PASSWORD", os.environ.get("SMTP_PASSWORD"))
+RECEIVER_EMAIL = st.secrets.get("RECEIVER_EMAIL", os.environ.get("RECEIVER_EMAIL"))
+EDGE_THRESHOLD = float(st.secrets.get("EDGE_THRESHOLD", os.environ.get("EDGE_THRESHOLD", 0.05)))
+
+# Validate environment variables
+if not ODDS_API_KEY:
+    st.error("ODDS_API_KEY is not set. Please configure it in secrets.toml or environment variables.")
+    st.stop()
+if not all([SMTP_EMAIL, SMTP_PASSWORD, RECEIVER_EMAIL]):
+    st.warning("Email settings are incomplete. Email alerts will not be sent.")
 
 st.set_page_config(page_title="MLB Betting Dashboard", layout="wide")
 
-# Abbreviations and expected runs
+# Team abbreviations and expected runs
 games = [
     {"home": "PHI", "away": "TOR", "home_exp": 4.8, "away_exp": 4.3},
     {"home": "WSH", "away": "MIA", "home_exp": 4.1, "away_exp": 4.6},
@@ -35,6 +46,7 @@ games = [
     {"home": "LAD", "away": "SF",  "home_exp": 5.3, "away_exp": 3.9},
 ]
 
+# Team full names mapping
 TEAM_FULL_NAMES = {
     "PHI": "Philadelphia Phillies", "TOR": "Toronto Blue Jays", "WSH": "Washington Nationals",
     "MIA": "Miami Marlins", "BAL": "Baltimore Orioles", "LAA": "Los Angeles Angels",
@@ -49,6 +61,7 @@ TEAM_FULL_NAMES = {
 }
 
 def simulate_game(home_exp, away_exp, sims=10000):
+    """Simulate game outcomes based on expected runs."""
     home_wins = sum(np.random.poisson(home_exp) > np.random.poisson(away_exp) for _ in range(sims))
     p_home = home_wins / sims
     p_away = 1 - p_home
@@ -56,6 +69,7 @@ def simulate_game(home_exp, away_exp, sims=10000):
     return p_home, p_away, to_ml(p_home), to_ml(p_away)
 
 def get_odds():
+    """Fetch odds from The Odds API."""
     url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={ODDS_API_KEY}&regions=us&markets=h2h&oddsFormat=american"
     try:
         res = requests.get(url)
@@ -66,20 +80,24 @@ def get_odds():
         return []
 
 def match_team(name, all_names):
-    match = get_close_matches(name, all_names, n=1, cutoff=0.6)
+    """Match team name to closest full name with high confidence."""
+    match = get_close_matches(name, all_names, n=1, cutoff=0.8)
     if not match:
-        st.warning(f"No match found for team: {name}")
+        st.warning(f"No close match found for team: {name}")
         return None
     return match[0]
 
 def extract_market_odds(api_data):
+    """Extract head-to-head odds from API data."""
     odds_dict = {}
     for game in api_data:
-        teams = game.get("teams", [])
         home = game.get("home_team")
+        teams = game.get("teams", [])
         if not teams or not home:
             continue
-        away = [t for t in teams if t != home][0]
+        away = next((t for t in teams if t != home), None)
+        if not away:
+            continue
         for book in game.get("bookmakers", []):
             for market in book.get("markets", []):
                 if market["key"] == "h2h":
@@ -92,6 +110,10 @@ def extract_market_odds(api_data):
     return odds_dict
 
 def send_email_alert(matchup, edge, fair_odds, book_odds):
+    """Send email alert for betting opportunities."""
+    if not all([SMTP_EMAIL, SMTP_PASSWORD, RECEIVER_EMAIL]):
+        st.error(f"Cannot send email for {matchup}: Email settings incomplete.")
+        return
     msg = MIMEText(f"""Value alert for {matchup}!
 Fair: {fair_odds}, Market: {book_odds}, Edge: {edge*100:.1f}%""")
     msg["Subject"] = f"VALUE ALERT: {matchup}"
@@ -107,28 +129,39 @@ Fair: {fair_odds}, Market: {book_odds}, Edge: {edge*100:.1f}%""")
 
 # === Run App ===
 st.title("⚾ MLB Betting Dashboard")
+
+# Fetch and process odds
 api_data = get_odds()
+if not api_data:
+    st.stop()
 odds_data = extract_market_odds(api_data)
 
+# Process games and calculate betting metrics
 rows = []
+all_team_names = list(TEAM_FULL_NAMES.values())
 for g in games:
     home_abbr, away_abbr = g["home"], g["away"]
-    home_full = TEAM_FULL_NAMES[home_abbr]
-    away_full = TEAM_FULL_NAMES[away_abbr]
+    home_full = TEAM_FULL_NAMES.get(home_abbr, home_abbr)
+    away_full = TEAM_FULL_NAMES.get(away_abbr, away_abbr)
 
+    # Simulate game to get probabilities and fair odds
     ph, pa, mlh, mla = simulate_game(g["home_exp"], g["away_exp"])
 
-    matchup_key = (match_team(home_full, [k[0] for k in odds_data.keys()]), 
-                   match_team(away_full, [k[1] for k in odds_data.keys()]))
+    # Match teams to API data
+    matchup_key = (
+        match_team(home_full, all_team_names),
+        match_team(away_full, all_team_names)
+    )
     if None in matchup_key:
         mh, ma = None, None
     else:
         market = odds_data.get(matchup_key, {})
         mh, ma = market.get("home_odds"), market.get("away_odds")
 
+    # Calculate edge if odds are valid
     edge = None
     bet = ""
-    if mh and mlh and isinstance(mh, (int, float)) and mlh != 0:
+    if mh and mlh and isinstance(mh, (int, float)) and isinstance(mlh, (int, float)) and mlh != 0:
         edge = (mh - mlh) / abs(mlh)
         if edge >= EDGE_THRESHOLD:
             bet = "✅"
@@ -145,7 +178,15 @@ for g in games:
         "Alert": bet
     })
 
+# Display results
 df = pd.DataFrame(rows)
 df.fillna("", inplace=True)
 st.dataframe(df, use_container_width=True)
-st.download_button("📁 Export CSV", df.to_csv(index=False), file_name="mlb_odds.csv")
+
+# Export CSV with timestamp
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+st.download_button(
+    "📁 Export CSV",
+    df.to_csv(index=False),
+    file_name=f"mlb_odds_{timestamp}.csv"
+)
