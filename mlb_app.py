@@ -8,6 +8,9 @@ from email.mime.text import MIMEText
 from difflib import get_close_matches
 import os
 
+# Set page config as the first Streamlit command
+st.set_page_config(page_title="MLB Betting Dashboard", layout="wide")
+
 # Load environment variables (use st.secrets for Streamlit Cloud, fallback to os.environ)
 ODDS_API_KEY = st.secrets.get("ODDS_API_KEY", os.environ.get("ODDS_API_KEY"))
 SMTP_EMAIL = st.secrets.get("SMTP_EMAIL", os.environ.get("SMTP_EMAIL"))
@@ -24,8 +27,6 @@ else:
 
 if not all([SMTP_EMAIL, SMTP_PASSWORD, RECEIVER_EMAIL]):
     st.warning("Email settings are incomplete. Email alerts will not be sent.")
-
-st.set_page_config(page_title="MLB Betting Dashboard", layout="wide")
 
 # Team abbreviations and expected runs
 games = [
@@ -127,13 +128,13 @@ Fair: {fair_odds}, Market: {book_odds}, Edge: {edge*100:.1f}%""")
         st.error(f"Email failed for {matchup}: {e}")
 
 # === Run App ===
-st.title("⚾ CC's MLB Moneyline Dashboard")
+st.title("⚾ MLB Betting Dashboard")
 
 # Fetch and process odds
 api_data = get_odds()
 if not api_data:
     st.stop()
-odds_data = personally_market_odds(api_data)
+odds_data = extract_market_odds(api_data)
 
 # Process games and calculate betting metrics
 rows = []
@@ -164,7 +165,7 @@ for g in games:
         edge = (mh - mlh) / abs(mlh)
         if edge >= EDGE_THRESHOLD:
             bet = "✅"
-            send_email_alert(f"{away_abbr} @ {home-CoreLogic}", edge, mlh, mh)
+            send_email_alert(f"{away_abbr} @ {home_abbr}", edge, mlh, mh)
 
     rows.append({
         "Matchup": f"{away_abbr} @ {home_abbr}",
