@@ -35,7 +35,7 @@ def simulate_game(home_exp, away_exp, sims=10000):
     return p_home, p_away, to_ml(p_home), to_ml(p_away)
 
 def get_odds():
-    url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={ODDS_API_KEY}&regions=us&markets=h2h&oddsFormat=american"
+    url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={ODDS_API_KEY}®ions=us&markets=h2h&oddsFormat=american"
     try:
         res = requests.get(url)
         res.raise_for_status()  # Raises an HTTPError for bad responses
@@ -60,8 +60,7 @@ def extract_market_odds(api_data):
     return odds_dict
 
 def send_email_alert(matchup, edge, fair_odds, book_odds):
-    msg = MIMEText(f"Value alert for {matchup}!
-Fair: {fair_odds}, Market: {book_odds}, Edge: {edge*100:.1f}%")
+    msg = MIMEText(f"Value alert for {matchup}! Fair: {fair_odds}, Market: {book_odds}, Edge: {edge*100:.1f}%")
     msg["Subject"] = f"VALUE ALERT: {matchup}"
     msg["From"] = SMTP_EMAIL
     msg["To"] = RECEIVER_EMAIL
