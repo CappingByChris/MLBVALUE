@@ -70,7 +70,7 @@ def simulate_game(home_exp, away_exp, sims=10000):
 
 def get_odds():
     """Fetch odds from The Odds API."""
-    url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={0a9a20c6b8b08c7cec9ed49704a8ffab}®ions=us&markets=h2h&oddsFormat=american"
+    url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={ODDS_API_KEY}®ions=us&markets=h2h&oddsFormat=american"
     try:
         res = requests.get(url)
         res.raise_for_status()
