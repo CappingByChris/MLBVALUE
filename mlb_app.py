@@ -45,22 +45,26 @@ def get_odds():
 def extract_market_odds(api_data):
     odds_dict = {}
     for game in api_data:
-        teams = game['teams']
         home = game['home_team']
-        for bookmaker in game['bookmakers']:
-            for market in bookmaker['markets']:
-                if market['key'] == 'h2h':
-                    outcomes = {o['name']: o['price'] for o in market['outcomes']}
-                    odds_dict[f"{teams[0]} @ {teams[1]}"] = {
-                        "home_odds": outcomes.get(home),
-                        "away_odds": outcomes.get(teams[0] if teams[1] == home else teams[1])
-                    }
+        try:
+            for bookmaker in game['bookmakers']:
+                for market in bookmaker['markets']:
+                    if market['key'] == 'h2h':
+                        outcomes = {o['name']: o['price'] for o in market['outcomes']}
+                        away = [team for team in outcomes if team != home][0]
+                        odds_dict[f"{away} @ {home}"] = {
+                            "home_odds": outcomes.get(home),
+                            "away_odds": outcomes.get(away)
+                        }
+                        break
+                break
+        except Exception as e:
+            st.warning(f"Failed to parse odds for a game: {e}")
     return odds_dict
 
 def send_email_alert(matchup, edge, fair_odds, book_odds):
     msg = MIMEText(
-        f"""Value alert for {matchup}!
-Fair: {fair_odds}, Market: {book_odds}, Edge: {edge*100:.1f}%"""
+        f"Value alert for {matchup}!\nFair: {fair_odds}, Market: {book_odds}, Edge: {edge*100:.1f}%"
     )
     msg["Subject"] = f"VALUE ALERT: {matchup}"
     msg["From"] = SMTP_EMAIL
@@ -76,7 +80,6 @@ Fair: {fair_odds}, Market: {book_odds}, Edge: {edge*100:.1f}%"""
 st.title("⚾ MLB Betting Dashboard")
 odds_data = extract_market_odds(get_odds())
 rows = []
-
 for g in games:
     ph, pa, mlh, mla = simulate_game(g["home_exp"], g["away_exp"])
     matchup = f"{g['away']} @ {g['home']}"
@@ -85,16 +88,19 @@ for g in games:
     edge = None
     bet = ""
     if mh and mlh:
-        edge = (int(mh) - mlh) / abs(mlh)
-        if edge >= EDGE_THRESHOLD:
-            bet = "✅"
-            send_email_alert(matchup, edge, mlh, mh)
+        try:
+            edge = (int(mh) - mlh) / abs(mlh)
+            if edge >= EDGE_THRESHOLD:
+                bet = "✅"
+                send_email_alert(matchup, edge, mlh, mh)
+        except:
+            edge = None
     rows.append({
         "Matchup": matchup,
         "P(Home Win)": round(ph, 3),
         "Fair ML (Home)": mlh,
         "Book ML (Home)": mh,
-        "Edge": f"{edge*100:.1f}%" if edge else "",
+        "Edge": f"{edge*100:.1f}%" if edge is not None else "",
         "Alert": bet
     })
 
