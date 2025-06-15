@@ -1,47 +1,17 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import datetime
 import requests
-from config import ODDS_API_KEY, SMTP_EMAIL, SMTP_PASSWORD, RECEIVER_EMAIL, EDGE_THRESHOLD
 import smtplib
+from datetime import datetime
 from email.mime.text import MIMEText
+from difflib import get_close_matches
+
+from config import ODDS_API_KEY, SMTP_EMAIL, SMTP_PASSWORD, RECEIVER_EMAIL, EDGE_THRESHOLD
 
 st.set_page_config(page_title="MLB Betting Dashboard", layout="wide")
 
-# Abbreviation to full team name mapping (for odds matching)
-TEAM_MAP = {
-    "PHI": "Philadelphia Phillies",
-    "TOR": "Toronto Blue Jays",
-    "WSH": "Washington Nationals",
-    "MIA": "Miami Marlins",
-    "BAL": "Baltimore Orioles",
-    "LAA": "Los Angeles Angels",
-    "NYM": "New York Mets",
-    "TB": "Tampa Bay Rays",
-    "BOS": "Boston Red Sox",
-    "NYY": "New York Yankees",
-    "DET": "Detroit Tigers",
-    "CIN": "Cincinnati Reds",
-    "ATL": "Atlanta Braves",
-    "COL": "Colorado Rockies",
-    "TEX": "Texas Rangers",
-    "CWS": "Chicago White Sox",
-    "MIL": "Milwaukee Brewers",
-    "STL": "St. Louis Cardinals",
-    "HOU": "Houston Astros",
-    "MIN": "Minnesota Twins",
-    "KC": "Kansas City Royals",
-    "OAK": "Oakland Athletics",
-    "ARI": "Arizona Diamondbacks",
-    "SD": "San Diego Padres",
-    "SEA": "Seattle Mariners",
-    "CLE": "Cleveland Guardians",
-    "LAD": "Los Angeles Dodgers",
-    "SF": "San Francisco Giants"
-}
-
-# Simulated expected run data
+# Abbreviations and expected runs
 games = [
     {"home": "PHI", "away": "TOR", "home_exp": 4.8, "away_exp": 4.3},
     {"home": "WSH", "away": "MIA", "home_exp": 4.1, "away_exp": 4.6},
@@ -59,6 +29,19 @@ games = [
     {"home": "LAD", "away": "SF",  "home_exp": 5.3, "away_exp": 3.9},
 ]
 
+TEAM_FULL_NAMES = {
+    "PHI": "Philadelphia Phillies", "TOR": "Toronto Blue Jays", "WSH": "Washington Nationals",
+    "MIA": "Miami Marlins", "BAL": "Baltimore Orioles", "LAA": "Los Angeles Angels",
+    "NYM": "New York Mets", "TB": "Tampa Bay Rays", "BOS": "Boston Red Sox",
+    "NYY": "New York Yankees", "DET": "Detroit Tigers", "CIN": "Cincinnati Reds",
+    "ATL": "Atlanta Braves", "COL": "Colorado Rockies", "TEX": "Texas Rangers",
+    "CWS": "Chicago White Sox", "MIL": "Milwaukee Brewers", "STL": "St. Louis Cardinals",
+    "HOU": "Houston Astros", "MIN": "Minnesota Twins", "KC": "Kansas City Royals",
+    "OAK": "Oakland Athletics", "ARI": "Arizona Diamondbacks", "SD": "San Diego Padres",
+    "SEA": "Seattle Mariners", "CLE": "Cleveland Guardians", "LAD": "Los Angeles Dodgers",
+    "SF": "San Francisco Giants"
+}
+
 def simulate_game(home_exp, away_exp, sims=10000):
     home_wins = sum(np.random.poisson(home_exp) > np.random.poisson(away_exp) for _ in range(sims))
     p_home = home_wins / sims
@@ -74,29 +57,30 @@ def get_odds():
     except:
         return []
 
+def match_team(name, all_names):
+    match = get_close_matches(name, all_names, n=1, cutoff=0.6)
+    return match[0] if match else None
+
 def extract_market_odds(api_data):
     odds_dict = {}
-    for game in api_data:
-        home_full = game.get('home_team')
-        teams = game.get('teams')
-        if not home_full or not teams or len(teams) != 2:
-            continue
-        away_full = [team for team in teams if team != home_full][0]
+    all_teams = set()
+    for g in api_data:
+        all_teams.update(g.get("teams", []))
 
-        try:
-            for bookmaker in game['bookmakers']:
-                for market in bookmaker['markets']:
-                    if market['key'] == 'h2h':
-                        outcomes = {o['name']: o['price'] for o in market['outcomes']}
-                        matchup_key = (home_full, away_full)
-                        odds_dict[matchup_key] = {
-                            "home_odds": outcomes.get(home_full),
-                            "away_odds": outcomes.get(away_full),
-                        }
-                        break
-                break
-        except Exception as e:
-            st.warning(f"Error parsing odds: {e}")
+    for game in api_data:
+        teams = game.get("teams", [])
+        home = game.get("home_team")
+        if not teams or not home: continue
+        away = [t for t in teams if t != home][0]
+        for book in game.get("bookmakers", []):
+            for market in book.get("markets", []):
+                if market["key"] == "h2h":
+                    prices = {o["name"]: o["price"] for o in market["outcomes"]}
+                    odds_dict[(home, away)] = {
+                        "home_odds": prices.get(home),
+                        "away_odds": prices.get(away)
+                    }
+                    break
     return odds_dict
 
 def send_email_alert(matchup, edge, fair_odds, book_odds):
@@ -112,25 +96,26 @@ Fair: {fair_odds}, Market: {book_odds}, Edge: {edge*100:.1f}%""")
     except Exception as e:
         st.error(f"Email failed: {e}")
 
-# Run app
+# === Run App ===
 st.title("⚾ MLB Betting Dashboard")
-odds_data = extract_market_odds(get_odds())
+api_data = get_odds()
+odds_data = extract_market_odds(api_data)
+
 rows = []
-
 for g in games:
-    ph, pa, mlh, mla = simulate_game(g["home_exp"], g["away_exp"])
-    home_abbr = g['home']
-    away_abbr = g['away']
-    home_full = TEAM_MAP[home_abbr]
-    away_full = TEAM_MAP[away_abbr]
+    home_abbr, away_abbr = g["home"], g["away"]
+    home_full = TEAM_FULL_NAMES[home_abbr]
+    away_full = TEAM_FULL_NAMES[away_abbr]
 
-    matchup_key = (home_full, away_full)
+    ph, pa, mlh, mla = simulate_game(g["home_exp"], g["away_exp"])
+
+    # Fuzzy match odds using difflib
+    matchup_key = match_team(home_full, [k[0] for k in odds_data.keys()]), match_team(away_full, [k[1] for k in odds_data.keys()])
     market = odds_data.get(matchup_key, {})
-    mh = market.get("home_odds")
-    ma = market.get("away_odds")
+    mh, ma = market.get("home_odds"), market.get("away_odds")
+
     edge = None
     bet = ""
-
     if mh and mlh:
         edge = (int(mh) - mlh) / abs(mlh)
         if edge >= EDGE_THRESHOLD:
@@ -150,5 +135,4 @@ for g in games:
 
 df = pd.DataFrame(rows)
 st.dataframe(df)
-
 st.download_button("📁 Export CSV", df.to_csv(index=False), file_name="mlb_odds.csv")
