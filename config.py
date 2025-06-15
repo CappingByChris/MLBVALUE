@@ -1,0 +1,7 @@
+# config.py
+
+ODDS_API_KEY = "0a9a20c6b8b08c7cec9ed49704a8ffab"
+SMTP_EMAIL = "thevaluefinder@gmail.com"
+SMTP_PASSWORD = "found value"
+RECEIVER_EMAIL = "cappingbychris@gmail.com"
+EDGE_THRESHOLD = 0.03  # 3% edge threshold
